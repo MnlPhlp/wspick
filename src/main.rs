@@ -1,6 +1,7 @@
 use std::{fs, path::PathBuf, process::Command};
 
 use anyhow::Result;
+use clap::Parser;
 use serde_derive::{Deserialize, Serialize};
 use toml::{map::Map, Value};
 
@@ -14,13 +15,25 @@ impl Projects {
     fn new() -> Result<Self> {
         Ok(Self {
             paths: Map::default(),
+            /// command to run with selected path as arg
             open_cmd: String::from(""),
             editor: edit::get_editor()?,
         })
     }
 }
 
+#[derive(Parser, Debug)]
+struct Flags {
+    /// always print selected path (ignores configured open_cmd)
+    #[arg(short, long)]
+    print: bool,
+
+    /// chose [new], [edit] or a path directly, without opening the selector
+    cmd_or_path: Option<String>,
+}
+
 fn main() -> Result<()> {
+    let flags = Flags::parse();
     // make sure config exists
     let dirs = directories::ProjectDirs::from("io.github", "mnlphlp", "wspick")
         .expect("home directory has to be found");
@@ -32,12 +45,20 @@ fn main() -> Result<()> {
     }
     // load config
     let mut config: Projects = toml::from_str(&fs::read_to_string(&config_file)?)?;
-    // build and show menu
+    // check cmd args
     let mut path = None;
+    if let Some(cmd) = flags.cmd_or_path {
+        match cmd.as_str() {
+            "new" => path = Some(new_project(&mut config, &config_file)?),
+            "edit" => edit_project(&mut config, &config_file)?,
+            _ => path = Some(cmd),
+        }
+    }
+    // build and show menu
     while path.is_none() {
         let mut options: Vec<String> = config.paths.keys().cloned().collect();
-        options.push("new".into());
-        options.push("edit".into());
+        options.push("[new]".into());
+        options.push("[edit]".into());
         let menu = inquire::Select::new("select project", options);
         if let Some(selected) = menu.prompt_skippable()? {
             match config.paths.get(&selected) {
@@ -45,7 +66,7 @@ fn main() -> Result<()> {
                     if selected == "new" {
                         path = Some(new_project(&mut config, &config_file)?)
                     } else if selected == "edit" {
-                        edit_prject(&mut config, &config_file)?;
+                        edit_project(&mut config, &config_file)?;
                     } else {
                         panic!("invalid option, this should never happen");
                     }
@@ -56,12 +77,12 @@ fn main() -> Result<()> {
             return Ok(());
         }
     }
-    open_project(&config.open_cmd, &path.unwrap())?;
+    open_project(&config.open_cmd, &path.unwrap(), flags.print)?;
     Ok(())
 }
 
-fn open_project(cmd: &str, path: &str) -> Result<()> {
-    if cmd.is_empty() {
+fn open_project(cmd: &str, path: &str, print: bool) -> Result<()> {
+    if print || cmd.is_empty() {
         println!("{path}");
     } else {
         Command::new(cmd).arg(path).spawn()?.wait()?;
@@ -79,7 +100,7 @@ fn new_project(config: &mut Projects, config_file: &PathBuf) -> Result<String> {
     Ok(path)
 }
 
-fn edit_prject(config: &mut Projects, config_file: &PathBuf) -> Result<()> {
+fn edit_project(config: &mut Projects, config_file: &PathBuf) -> Result<()> {
     Command::new(&config.editor)
         .arg(config_file)
         .spawn()?

@@ -1,6 +1,6 @@
 [package]
 name = "wspick"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "platform independant workspace picker for the terminal"
@@ -14,6 +14,7 @@ readme = "README.md"
 
 [dependencies]
 anyhow = "1.0.71"
+clap = { version = "4.3.8", features = ["derive"] }
 directories = "5.0.1"
 edit = "0.1.4"
 inquire = "0.6.2"
