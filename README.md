@@ -1,0 +1,2 @@
+# wspick
+terminal workspace picker
