@@ -63,9 +63,9 @@ fn main() -> Result<()> {
         if let Some(selected) = menu.prompt_skippable()? {
             match config.paths.get(&selected) {
                 None => {
-                    if selected == "new" {
+                    if selected == "[new]" {
                         path = Some(new_project(&mut config, &config_file)?)
-                    } else if selected == "edit" {
+                    } else if selected == "[edit]" {
                         edit_project(&mut config, &config_file)?;
                     } else {
                         panic!("invalid option, this should never happen");
