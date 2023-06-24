@@ -1,7 +1,15 @@
-use std::{fs, path::PathBuf, process::Command};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use anyhow::Result;
 use clap::Parser;
+use inquire::{
+    validator::{ErrorMessage, StringValidator, Validation},
+    CustomUserError,
+};
 use serde_derive::{Deserialize, Serialize};
 use toml::{map::Map, Value};
 
@@ -90,9 +98,33 @@ fn open_project(cmd: &str, path: &str, print: bool) -> Result<()> {
     Ok(())
 }
 
+#[derive(Clone)]
+struct FileValidator;
+impl StringValidator for FileValidator {
+    fn validate(
+        &self,
+        input: &str,
+    ) -> std::result::Result<inquire::validator::Validation, inquire::CustomUserError> {
+        match Path::new(input).try_exists() {
+            Ok(val) => {
+                if val {
+                    Ok(Validation::Valid)
+                } else {
+                    Ok(Validation::Invalid(ErrorMessage::Custom(format!(
+                        "path '{input}' does not exist"
+                    ))))
+                }
+            }
+            Err(e) => Err(CustomUserError::from(e)),
+        }
+    }
+}
+
 fn new_project(config: &mut Projects, config_file: &PathBuf) -> Result<String> {
     let name = inquire::Text::new("project name:").prompt()?;
-    let path = inquire::Text::new("project path:").prompt()?;
+    let path = inquire::Text::new("project path:")
+        .with_validator(FileValidator)
+        .prompt()?;
     config
         .paths
         .insert(name.clone(), Value::String(path.clone()));
