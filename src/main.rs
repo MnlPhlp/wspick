@@ -56,7 +56,6 @@ fn main() -> Result<()> {
     }
     // load config
     let mut config: Projects = toml::from_str(&fs::read_to_string(&config_file)?)?;
-    println!("{flags:?}");
     // check cmd args
     let mut path = None;
     if let Some(cmd) = flags.cmd_or_path {
@@ -130,7 +129,6 @@ fn new_project(
     path: Option<String>,
 ) -> Result<String> {
     let name = inquire::Text::new("project name:").prompt()?;
-    println!("path: {path:?}");
     let path = match path {
         Some(p) => p,
         None => inquire::Text::new("project path:")

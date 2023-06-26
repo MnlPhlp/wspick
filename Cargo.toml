@@ -1,6 +1,6 @@
 [package]
 name = "wspick"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "platform independant workspace picker for the terminal"
