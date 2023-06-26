@@ -31,6 +31,7 @@ impl Projects {
 }
 
 #[derive(Parser, Debug)]
+#[command(version, about)]
 struct Flags {
     /// always print selected path (ignores configured open_cmd)
     #[arg(short, long)]
@@ -38,6 +39,8 @@ struct Flags {
 
     /// chose [new], [edit] or a path directly, without opening the selector
     cmd_or_path: Option<String>,
+    /// path for project if given after [new] command
+    new_path: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -53,11 +56,12 @@ fn main() -> Result<()> {
     }
     // load config
     let mut config: Projects = toml::from_str(&fs::read_to_string(&config_file)?)?;
+    println!("{flags:?}");
     // check cmd args
     let mut path = None;
     if let Some(cmd) = flags.cmd_or_path {
         match cmd.as_str() {
-            "new" => path = Some(new_project(&mut config, &config_file)?),
+            "new" => path = Some(new_project(&mut config, &config_file, flags.new_path)?),
             "edit" => edit_project(&mut config, &config_file)?,
             _ => path = Some(cmd),
         }
@@ -72,7 +76,7 @@ fn main() -> Result<()> {
             match config.paths.get(&selected) {
                 None => {
                     if selected == "[new]" {
-                        path = Some(new_project(&mut config, &config_file)?)
+                        path = Some(new_project(&mut config, &config_file, None)?)
                     } else if selected == "[edit]" {
                         edit_project(&mut config, &config_file)?;
                     } else {
@@ -120,11 +124,19 @@ impl StringValidator for FileValidator {
     }
 }
 
-fn new_project(config: &mut Projects, config_file: &PathBuf) -> Result<String> {
+fn new_project(
+    config: &mut Projects,
+    config_file: &PathBuf,
+    path: Option<String>,
+) -> Result<String> {
     let name = inquire::Text::new("project name:").prompt()?;
-    let path = inquire::Text::new("project path:")
-        .with_validator(FileValidator)
-        .prompt()?;
+    println!("path: {path:?}");
+    let path = match path {
+        Some(p) => p,
+        None => inquire::Text::new("project path:")
+            .with_validator(FileValidator)
+            .prompt()?,
+    };
     config
         .paths
         .insert(name.clone(), Value::String(path.clone()));
