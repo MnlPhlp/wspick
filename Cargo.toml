@@ -1,6 +1,6 @@
 [package]
 name = "wspick"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "platform independant workspace picker for the terminal"
@@ -20,4 +20,4 @@ edit = "0.1.4"
 inquire = "0.6.2"
 serde = "1.0.164"
 serde_derive = "1.0.164"
-toml = "0.7.5"
+toml = { version = "0.7.5", features = ["preserve_order"] }
