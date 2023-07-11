@@ -4,6 +4,10 @@ terminal workspace picker
 ![example](images/example.png)
 
 -----
+## Installation
+`cargo install wspick`
+
+-----
 ## Usage
 Calling wspick opens a selector with projects that can be opened in a configured editor.
 New projects can be added by selecting new and specifing path and name or by editing the config directly
