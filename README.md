@@ -26,6 +26,8 @@ terminal workspace picker
 ## Installation
 `cargo install wspick`
 
+or just download a binary from the [releases section](https://github.com/MnlPhlp/wspick/releases)
+
 -----
 ## Usage
 Calling wspick opens a selector with projects that can be opened in a configured editor.
