@@ -75,7 +75,7 @@ fn main() -> Result<()> {
         let mut options: Vec<String> = config.paths.keys().cloned().collect();
         options.push("[new]".into());
         options.push("[edit]".into());
-        let menu = inquire::Select::new("select project", options)
+        let menu = inquire::Select::new("select project:", options)
             .with_page_size(termsize::get().map(|size| size.rows - 3).unwrap_or(10) as usize);
         if let Some(selected) = menu.prompt_skippable()? {
             match config.paths.get(&selected) {

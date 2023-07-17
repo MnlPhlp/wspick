@@ -1,7 +1,26 @@
 # wspick
 terminal workspace picker
 
-![example](images/example.png)
+ If you hate typing out all your long project paths in the terminal just to cd there or open them in an editor, this is for you.
+
+```bash
+❯ wspick
+? select project:
+> test1
+  test2
+  project
+  [new]
+  [edit]
+[↑↓ to move, enter to select, type to filter]  
+```
+
+```bash
+❯ wspick
+? select project: tes 
+> test1
+  test2
+[↑↓ to move, enter to select, type to filter]
+```
 
 -----
 ## Installation
