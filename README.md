@@ -9,9 +9,10 @@ terminal workspace picker
 > test1
   test2
   project
-  [new]
+  [new project]
+  [new dir]
   [edit]
-[↑↓ to move, enter to select, type to filter]  
+[↑↓ to move, enter to select, type to filter]
 ```
 
 ```bash
@@ -29,12 +30,14 @@ terminal workspace picker
 -----
 ## Usage
 Calling wspick opens a selector with projects that can be opened in a configured editor.
-New projects can be added by selecting new and specifing path and name or by editing the config directly
+New projects can be added by selecting `new project` and specifing path and name or by selecting `edit` and editing the config directly.
+With `new dir` you can add a path and wspick will show all directories in that path as project.
 
 ```bash
 wspick
 ? select project  
-> [new]
+> [new project]
+  [new dir]
   [edit]
 [↑↓ to move, enter to select, type to filter]
 ```
@@ -51,6 +54,7 @@ alias cdws='cd $(wspick -p)'
 ## Config
 On first start a new configfile `wspick.toml` is generated and stored in an appropriate location. On linux this is `~/.config/wspick`
 ```yaml
+dirs = []
 open_cmd = ""
 editor = "/usr/bin/helix"
 sort = true
@@ -59,6 +63,7 @@ sort = true
 exercism-rust = "/home/manuel/programming/exercism/rust"
 ```
 
+- `dirs`: list of directories. All subdirectories will be shown as projects
 - `open_cmd`: command that is executed on selection. Empty means printing the selected path
 - `editor`: editor used when you select edit
 - `sort`: wheter to sort prjects alphabetically

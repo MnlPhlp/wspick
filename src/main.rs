@@ -16,6 +16,7 @@ use toml::{map::Map, Value};
 #[derive(Debug, Deserialize, Serialize)]
 struct Projects {
     paths: Map<String, Value>,
+    dirs: Option<Vec<String>>,
     open_cmd: String,
     editor: PathBuf,
     /// sort projects alphabetically
@@ -25,6 +26,7 @@ impl Projects {
     fn new() -> Result<Self> {
         Ok(Self {
             paths: Map::default(),
+            dirs: Some(vec![]),
             /// command to run with selected path as arg
             open_cmd: String::from(""),
             editor: edit::get_editor()?,
@@ -73,19 +75,27 @@ fn main() -> Result<()> {
     // build and show menu
     while path.is_none() {
         let mut options: Vec<String> = config.paths.keys().cloned().collect();
-        options.push("[new]".into());
+        let dir_paths = add_options_from_dirs(&mut config, &mut options)?;
+        options.push("[new project]".into());
+        options.push("[new dir]".into());
         options.push("[edit]".into());
         let menu = inquire::Select::new("select project:", options)
             .with_page_size(termsize::get().map(|size| size.rows - 3).unwrap_or(10) as usize);
         if let Some(selected) = menu.prompt_skippable()? {
             match config.paths.get(&selected) {
                 None => {
-                    if selected == "[new]" {
+                    if selected == "[new project]" {
                         path = Some(new_project(&mut config, &config_file, None)?)
+                    } else if selected == "[new dir]" {
+                        add_dir(&mut config, &config_file)?;
                     } else if selected == "[edit]" {
                         edit_project(&mut config, &config_file)?;
                     } else {
-                        panic!("invalid option, this should never happen");
+                        path = Some(get_path(
+                            dir_paths
+                                .get(&selected)
+                                .expect("invalid option, this should never happen"),
+                        ));
                     }
                 }
                 Some(val) => path = Some(get_path(val)),
@@ -98,11 +108,67 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn add_dir(config: &mut Projects, config_file: &PathBuf) -> Result<()> {
+    let path = inquire::Text::new("directory path:")
+        .with_validator(FileValidator)
+        .prompt()?;
+    if config.dirs.is_none() {
+        config.dirs = Some(vec![])
+    }
+    config.dirs.as_mut().unwrap().push(path);
+    sort_config(config);
+    fs::write(config_file, toml::to_string(&config)?)?;
+    Ok(())
+}
+
+fn add_options_from_dirs(
+    config: &mut Projects,
+    options: &mut Vec<String>,
+) -> Result<Map<String, Value>> {
+    let mut map = Map::new();
+    if let Some(dirs) = config.dirs.as_ref() {
+        for dir in dirs {
+            let dir_path = PathBuf::from(dir);
+            let dir_name = dir_path.file_name().map(|d| d.to_str());
+            if dir_name.is_none() || dir_name.unwrap().is_none() {
+                continue;
+            }
+            let paths = fs::read_dir(dir)?.filter(|f| {
+                if f.is_err() {
+                    return false;
+                }
+                if let Ok(ft) = f.as_ref().unwrap().file_type() {
+                    return ft.is_dir();
+                }
+                return false;
+            });
+            for path in paths {
+                if let Ok(path) = path.map(|p| p.path()) {
+                    let path_str = path.to_str();
+                    let name = path.file_name().map(|n| n.to_str());
+                    if path_str.is_none() || name.is_none() || name.unwrap().is_none() {
+                        continue;
+                    }
+                    let key = String::from(name.unwrap().unwrap());
+                    options.push(key.clone());
+                    map.insert(key, Value::String(String::from(path_str.unwrap())));
+                }
+            }
+        }
+        options.sort();
+    }
+    Ok(map)
+}
+
 fn update_config(config: &mut Projects, config_file: &PathBuf) -> Result<()> {
     let mut changed = false;
     if config.sort.is_none() {
         config.sort = Some(true);
         sort_config(config);
+        changed = true;
+    }
+    if config.dirs.is_none() {
+        config.dirs = Some(vec![]);
         changed = true;
     }
     if changed {
