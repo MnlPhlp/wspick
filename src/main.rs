@@ -1,36 +1,41 @@
 use std::{
+    collections::HashMap,
     fs,
+    iter::Map,
     path::{Path, PathBuf},
     process::Command,
 };
 
 use anyhow::Result;
 use clap::Parser;
+use indexmap::IndexMap;
 use inquire::{
     validator::{ErrorMessage, StringValidator, Validation},
     CustomUserError,
 };
 use serde_derive::{Deserialize, Serialize};
-use toml::{map::Map, Value};
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Projects {
-    paths: Map<String, Value>,
+    paths: IndexMap<String, String>,
     dirs: Option<Vec<String>>,
     open_cmd: String,
     editor: PathBuf,
     /// sort projects alphabetically
     sort: Option<bool>,
+    /// exclude directories that contain projects from automatic list
+    exclude_proj_dirs: Option<bool>,
 }
 impl Projects {
     fn new() -> Result<Self> {
         Ok(Self {
-            paths: Map::default(),
+            paths: IndexMap::default(),
             dirs: Some(vec![]),
             /// command to run with selected path as arg
             open_cmd: String::from(""),
             editor: edit::get_editor()?,
             sort: Some(true),
+            exclude_proj_dirs: Some(false),
         })
     }
 }
@@ -57,10 +62,10 @@ fn main() -> Result<()> {
     let config_file = config_dir.join("wspick.toml");
     if !config_file.try_exists()? {
         fs::create_dir_all(config_dir)?;
-        fs::write(&config_file, toml::to_string(&Projects::new()?)?)?;
+        fs::write(&config_file, toml_edit::ser::to_string(&Projects::new()?)?)?;
     }
     // load config
-    let mut config: Projects = toml::from_str(&fs::read_to_string(&config_file)?)?;
+    let mut config: Projects = toml_edit::de::from_str(&fs::read_to_string(&config_file)?)?;
     // add later added config items
     update_config(&mut config, &config_file)?;
     // check cmd args
@@ -91,14 +96,15 @@ fn main() -> Result<()> {
                     } else if selected == "[edit]" {
                         edit_project(&mut config, &config_file)?;
                     } else {
-                        path = Some(get_path(
+                        path = Some(
                             dir_paths
                                 .get(&selected)
-                                .expect("invalid option, this should never happen"),
-                        ));
+                                .expect("invalid option, this should never happen")
+                                .clone(),
+                        );
                     }
                 }
-                Some(val) => path = Some(get_path(val)),
+                Some(val) => path = Some(val.clone()),
             }
         } else {
             return Ok(());
@@ -117,15 +123,15 @@ fn add_dir(config: &mut Projects, config_file: &PathBuf) -> Result<()> {
     }
     config.dirs.as_mut().unwrap().push(path);
     sort_config(config);
-    fs::write(config_file, toml::to_string(&config)?)?;
+    fs::write(config_file, toml_edit::ser::to_string(&config)?)?;
     Ok(())
 }
 
 fn add_options_from_dirs(
     config: &mut Projects,
     options: &mut Vec<String>,
-) -> Result<Map<String, Value>> {
-    let mut map = Map::new();
+) -> Result<HashMap<String, String>> {
+    let mut map = HashMap::new();
     if let Some(dirs) = config.dirs.as_ref() {
         for dir in dirs {
             let dir_path = PathBuf::from(dir);
@@ -133,15 +139,35 @@ fn add_options_from_dirs(
             if dir_name.is_none() || dir_name.unwrap().is_none() {
                 continue;
             }
-            let paths = fs::read_dir(dir)?.filter(|f| {
-                if f.is_err() {
+            // filter for directories
+            let mut paths = fs::read_dir(dir)?
+                .filter(|f| {
+                    if f.is_err() {
+                        return false;
+                    }
+                    if let Ok(ft) = f.as_ref().unwrap().file_type() {
+                        return ft.is_dir();
+                    }
                     return false;
-                }
-                if let Ok(ft) = f.as_ref().unwrap().file_type() {
-                    return ft.is_dir();
-                }
-                return false;
-            });
+                })
+                .collect::<Vec<_>>();
+            if let Some(true) = config.exclude_proj_dirs {
+                // filter out directories that contain projects
+                paths = paths
+                    .into_iter()
+                    .filter(|p| {
+                        if let Ok(p) = p {
+                            let name = p.file_name().to_string_lossy().to_string();
+                            for proj in config.paths.values() {
+                                if proj.contains(&name) {
+                                    return false;
+                                }
+                            }
+                        }
+                        return true;
+                    })
+                    .collect();
+            }
             for path in paths {
                 if let Ok(path) = path.map(|p| p.path()) {
                     let path_str = path.to_str();
@@ -151,7 +177,7 @@ fn add_options_from_dirs(
                     }
                     let key = String::from(name.unwrap().unwrap());
                     options.push(key.clone());
-                    map.insert(key, Value::String(String::from(path_str.unwrap())));
+                    map.insert(key, path_str.unwrap().into());
                 }
             }
         }
@@ -171,8 +197,12 @@ fn update_config(config: &mut Projects, config_file: &PathBuf) -> Result<()> {
         config.dirs = Some(vec![]);
         changed = true;
     }
+    if config.exclude_proj_dirs.is_none() {
+        config.exclude_proj_dirs = Some(false);
+        changed = true;
+    }
     if changed {
-        fs::write(config_file, toml::to_string(&config)?)?;
+        fs::write(config_file, toml_edit::ser::to_string(&config)?)?;
     }
     Ok(())
 }
@@ -221,15 +251,15 @@ fn new_project(
             .prompt()?,
     };
     // store adjusted config
-    config.paths.insert(name, Value::String(path.clone()));
+    config.paths.insert(name, path.clone());
     sort_config(config);
-    fs::write(config_file, toml::to_string(&config)?)?;
+    fs::write(config_file, toml_edit::ser::to_string(&config)?)?;
     Ok(path)
 }
 
 fn sort_config(config: &mut Projects) {
     if config.sort.unwrap_or(false) {
-        let mut new_paths = Map::with_capacity(config.paths.len());
+        let mut new_paths = IndexMap::with_capacity(config.paths.len());
         let mut keys = config.paths.keys().cloned().collect::<Vec<String>>();
         keys.sort();
         for k in keys {
@@ -245,16 +275,12 @@ fn edit_project(config: &mut Projects, config_file: &PathBuf) -> Result<()> {
         .arg(config_file)
         .spawn()?
         .wait()?;
-    let new_config: Projects = toml::from_str(&fs::read_to_string(config_file)?)?;
+    let new_config: Projects = toml_edit::de::from_str(&fs::read_to_string(config_file)?)?;
     config.paths = new_config.paths;
     config.editor = new_config.editor;
     config.open_cmd = new_config.open_cmd;
+    config.sort = new_config.sort;
+    config.dirs = new_config.dirs;
+    config.exclude_proj_dirs = new_config.exclude_proj_dirs;
     Ok(())
-}
-
-fn get_path(path: &Value) -> String {
-    match path {
-        Value::String(path) => path.to_owned(),
-        _ => panic!("get_path called with not a string"),
-    }
 }

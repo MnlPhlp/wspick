@@ -1,10 +1,10 @@
 [package]
 name = "wspick"
-version = "1.1.1"
+version = "1.2.0"
 authors = ["MnlPhlp <online@philipp-manuel.de>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "platform independant workspace picker for the terminal"
+description = "platform independent workspace picker for the terminal"
 homepage = "https://github.com/MnlPhlp/wspick"
 repository = "https://github.com/MnlPhlp/wspick"
 keywords = ["cli", "project", "workspace", "picker", "manager"]
@@ -22,4 +22,5 @@ inquire = "0.6.2"
 serde = "1.0.164"
 serde_derive = "1.0.164"
 termsize = "0.1.6"
-toml = { version = "0.7.5", features = ["preserve_order"] }
+toml_edit = { version = "0.19.14", features = ["serde"] }
+indexmap = { version = "2.0.0", features = ["serde"] }
