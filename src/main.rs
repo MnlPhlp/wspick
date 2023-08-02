@@ -1,13 +1,13 @@
 use std::{
     collections::HashMap,
     fs,
-    iter::Map,
     path::{Path, PathBuf},
     process::Command,
 };
 
 use anyhow::Result;
 use clap::Parser;
+use doc_consts::DocConsts;
 use indexmap::IndexMap;
 use inquire::{
     validator::{ErrorMessage, StringValidator, Validation},
@@ -15,28 +15,33 @@ use inquire::{
 };
 use serde_derive::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, DocConsts)]
 struct Projects {
+    /// Paths to specific projects
     paths: IndexMap<String, String>,
+    /// Directories to search for projects
     dirs: Option<Vec<String>>,
+    /// command to run with selected path as arg
     open_cmd: String,
-    editor: PathBuf,
+    /// editor to open config with
+    editor: String,
     /// sort projects alphabetically
     sort: Option<bool>,
     /// exclude directories that contain projects from automatic list
     exclude_proj_dirs: Option<bool>,
 }
 impl Projects {
-    fn new() -> Result<Self> {
-        Ok(Self {
+    fn new() -> Self {
+        Self {
             paths: IndexMap::default(),
             dirs: Some(vec![]),
-            /// command to run with selected path as arg
             open_cmd: String::from(""),
-            editor: edit::get_editor()?,
+            editor: edit::get_editor()
+                .map(|e| e.to_str().unwrap_or("").into())
+                .unwrap_or("".into()),
             sort: Some(true),
             exclude_proj_dirs: Some(false),
-        })
+        }
     }
 }
 
@@ -61,14 +66,13 @@ fn main() -> Result<()> {
     let config_dir = dirs.config_dir();
     let config_file = config_dir.join("wspick.toml");
     if !config_file.try_exists()? {
-        fs::create_dir_all(config_dir)?;
-        fs::write(&config_file, toml_edit::ser::to_string(&Projects::new()?)?)?;
+        save_config(&Projects::new(), &config_file)?;
     }
     // load config
     let mut config: Projects = toml_edit::de::from_str(&fs::read_to_string(&config_file)?)?;
     // add later added config items
     update_config(&mut config, &config_file)?;
-    // check cmd args
+    // check cmd args#
     let mut path = None;
     if let Some(cmd) = flags.cmd_or_path {
         match cmd.as_str() {
@@ -123,7 +127,7 @@ fn add_dir(config: &mut Projects, config_file: &PathBuf) -> Result<()> {
     }
     config.dirs.as_mut().unwrap().push(path);
     sort_config(config);
-    fs::write(config_file, toml_edit::ser::to_string(&config)?)?;
+    save_config(config, config_file)?;
     Ok(())
 }
 
@@ -202,8 +206,45 @@ fn update_config(config: &mut Projects, config_file: &PathBuf) -> Result<()> {
         changed = true;
     }
     if changed {
-        fs::write(config_file, toml_edit::ser::to_string(&config)?)?;
+        save_config(config, config_file)?;
     }
+    Ok(())
+}
+
+fn save_config(config: &Projects, config_file: &PathBuf) -> Result<()> {
+    let mut doc = toml_edit::ser::to_document(&config)?;
+    // add comments
+    for elem in doc.iter_mut() {
+        match elem.0 {
+            mut key if key.to_string() == "open_cmd" => {
+                key.decor_mut()
+                    .set_prefix(format!("# {}\n", Projects::get_docs().open_cmd));
+            }
+            mut key if key.to_string() == "sort" => {
+                key.decor_mut()
+                    .set_prefix(format!("# {}\n", Projects::get_docs().sort));
+            }
+            mut key if key.to_string() == "exclude_proj_dirs" => {
+                key.decor_mut()
+                    .set_prefix(format!("# {}\n", Projects::get_docs().exclude_proj_dirs));
+            }
+            mut key if key.to_string() == "paths" => {
+                key.decor_mut()
+                    .set_prefix(format!("# {}\n", Projects::get_docs().paths));
+            }
+            mut key if key.to_string() == "dirs" => {
+                key.decor_mut()
+                    .set_prefix(format!("# {}\n", Projects::get_docs().dirs));
+            }
+
+            mut key if key.to_string() == "editor" => {
+                key.decor_mut()
+                    .set_prefix(format!("# {}\n", Projects::get_docs().editor));
+            }
+            _ => (),
+        }
+    }
+    fs::write(config_file, doc.to_string())?;
     Ok(())
 }
 
@@ -253,7 +294,7 @@ fn new_project(
     // store adjusted config
     config.paths.insert(name, path.clone());
     sort_config(config);
-    fs::write(config_file, toml_edit::ser::to_string(&config)?)?;
+    save_config(config, config_file)?;
     Ok(path)
 }
 
