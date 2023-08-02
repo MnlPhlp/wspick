@@ -22,6 +22,6 @@ inquire = "0.6.2"
 serde = "1.0.164"
 serde_derive = "1.0.164"
 termsize = "0.1.6"
-toml_edit = { version = "0.19.14", features = ["serde"] }
 indexmap = { version = "2.0.0", features = ["serde"] }
+toml = { version = "0.7.6", features = ["preserve_order"] }
 doc_consts = { version = "0.1.0" }

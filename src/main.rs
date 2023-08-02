@@ -17,8 +17,6 @@ use serde_derive::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, DocConsts)]
 struct Projects {
-    /// Paths to specific projects
-    paths: IndexMap<String, String>,
     /// Directories to search for projects
     dirs: Option<Vec<String>>,
     /// command to run with selected path as arg
@@ -29,6 +27,8 @@ struct Projects {
     sort: Option<bool>,
     /// exclude directories that contain projects from automatic list
     exclude_proj_dirs: Option<bool>,
+    /// Paths to specific projects
+    paths: IndexMap<String, String>,
 }
 impl Projects {
     fn new() -> Self {
@@ -69,7 +69,8 @@ fn main() -> Result<()> {
         save_config(&Projects::new(), &config_file)?;
     }
     // load config
-    let mut config: Projects = toml_edit::de::from_str(&fs::read_to_string(&config_file)?)?;
+    // let mut config: Projects = toml_edit::de::from_str(&fs::read_to_string(&config_file)?)?;
+    let mut config: Projects = toml::from_str(&fs::read_to_string(&config_file)?)?;
     // add later added config items
     update_config(&mut config, &config_file)?;
     // check cmd args#
@@ -152,25 +153,22 @@ fn add_options_from_dirs(
                     if let Ok(ft) = f.as_ref().unwrap().file_type() {
                         return ft.is_dir();
                     }
-                    return false;
+                    false
                 })
                 .collect::<Vec<_>>();
             if let Some(true) = config.exclude_proj_dirs {
                 // filter out directories that contain projects
-                paths = paths
-                    .into_iter()
-                    .filter(|p| {
-                        if let Ok(p) = p {
-                            let name = p.file_name().to_string_lossy().to_string();
-                            for proj in config.paths.values() {
-                                if proj.contains(&name) {
-                                    return false;
-                                }
+                paths.retain(|p| {
+                    if let Ok(p) = p {
+                        let name = p.file_name().to_string_lossy().to_string();
+                        for proj in config.paths.values() {
+                            if proj.contains(&name) {
+                                return false;
                             }
                         }
-                        return true;
-                    })
-                    .collect();
+                    }
+                    true
+                });
             }
             for path in paths {
                 if let Ok(path) = path.map(|p| p.path()) {
@@ -212,39 +210,34 @@ fn update_config(config: &mut Projects, config_file: &PathBuf) -> Result<()> {
 }
 
 fn save_config(config: &Projects, config_file: &PathBuf) -> Result<()> {
-    let mut doc = toml_edit::ser::to_document(&config)?;
+    let doc = toml::ser::to_string_pretty(config)?;
+    let mut doc_commented = vec![];
     // add comments
-    for elem in doc.iter_mut() {
-        match elem.0 {
-            mut key if key.to_string() == "open_cmd" => {
-                key.decor_mut()
-                    .set_prefix(format!("# {}\n", Projects::get_docs().open_cmd));
+    for line in doc.lines() {
+        match &line[..line.find(' ').unwrap_or(line.len())] {
+            "open_cmd" => {
+                doc_commented.push(format!("# {}", Projects::get_docs().open_cmd));
             }
-            mut key if key.to_string() == "sort" => {
-                key.decor_mut()
-                    .set_prefix(format!("# {}\n", Projects::get_docs().sort));
+            "sort" => {
+                doc_commented.push(format!("# {}", Projects::get_docs().sort));
             }
-            mut key if key.to_string() == "exclude_proj_dirs" => {
-                key.decor_mut()
-                    .set_prefix(format!("# {}\n", Projects::get_docs().exclude_proj_dirs));
+            "exclude_proj_dirs" => {
+                doc_commented.push(format!("# {}", Projects::get_docs().exclude_proj_dirs));
             }
-            mut key if key.to_string() == "paths" => {
-                key.decor_mut()
-                    .set_prefix(format!("# {}\n", Projects::get_docs().paths));
+            "[paths]" => {
+                doc_commented.push(format!("# {}", Projects::get_docs().paths));
             }
-            mut key if key.to_string() == "dirs" => {
-                key.decor_mut()
-                    .set_prefix(format!("# {}\n", Projects::get_docs().dirs));
+            "dirs" => {
+                doc_commented.push(format!("# {}", Projects::get_docs().dirs));
             }
-
-            mut key if key.to_string() == "editor" => {
-                key.decor_mut()
-                    .set_prefix(format!("# {}\n", Projects::get_docs().editor));
+            "editor" => {
+                doc_commented.push(format!("# {}", Projects::get_docs().editor));
             }
             _ => (),
         }
+        doc_commented.push(line.to_string())
     }
-    fs::write(config_file, doc.to_string())?;
+    fs::write(config_file, doc_commented.join("\n"))?;
     Ok(())
 }
 
@@ -316,7 +309,7 @@ fn edit_project(config: &mut Projects, config_file: &PathBuf) -> Result<()> {
         .arg(config_file)
         .spawn()?
         .wait()?;
-    let new_config: Projects = toml_edit::de::from_str(&fs::read_to_string(config_file)?)?;
+    let new_config: Projects = toml::from_str(&fs::read_to_string(config_file)?)?;
     config.paths = new_config.paths;
     config.editor = new_config.editor;
     config.open_cmd = new_config.open_cmd;
