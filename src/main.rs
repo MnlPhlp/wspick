@@ -161,9 +161,18 @@ fn add_options_from_dirs(
                 paths.retain(|p| {
                     if let Ok(p) = p {
                         let name = p.file_name().to_string_lossy().to_string();
+                        // filter custom project paths
                         for proj in config.paths.values() {
                             if proj.contains(&name) {
                                 return false;
+                            }
+                        }
+                        // filter searched dirs
+                        if let Some(dirs) = &config.dirs {
+                            for dir in dirs {
+                                if dir.contains(&name) {
+                                    return false;
+                                }
                             }
                         }
                     }
