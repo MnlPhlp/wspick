@@ -183,7 +183,11 @@ fn add_options_from_dirs(
                 if let Ok(path) = path.map(|p| p.path()) {
                     let path_str = path.to_str();
                     let name = path.file_name().map(|n| n.to_str());
-                    if path_str.is_none() || name.is_none() || name.unwrap().is_none() {
+                    if path_str.is_none()
+                        || name.is_none()
+                        || name.unwrap().is_none()
+                        || name.unwrap().unwrap().starts_with('.')
+                    {
                         continue;
                     }
                     let key = String::from(name.unwrap().unwrap());
