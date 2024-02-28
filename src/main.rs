@@ -250,6 +250,7 @@ fn save_config(config: &Projects, config_file: &PathBuf) -> Result<()> {
         }
         doc_commented.push(line.to_string())
     }
+    fs::create_dir_all(config_file.parent().unwrap())?;
     fs::write(config_file, doc_commented.join("\n"))?;
     Ok(())
 }
