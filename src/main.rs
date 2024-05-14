@@ -69,8 +69,7 @@ fn main() -> Result<()> {
         save_config(&Projects::new(), &config_file)?;
     }
     // load config
-    // let mut config: Projects = toml_edit::de::from_str(&fs::read_to_string(&config_file)?)?;
-    let mut config: Projects = toml::from_str(&fs::read_to_string(&config_file)?)?;
+    let mut config = load_config(&config_file)?;
     // add later added config items
     update_config(&mut config, &config_file)?;
     // check cmd args#
@@ -117,6 +116,34 @@ fn main() -> Result<()> {
     }
     open_project(&config.open_cmd, &path.unwrap(), flags.print)?;
     Ok(())
+}
+
+fn load_config(config_file: &PathBuf) -> Result<Projects> {
+    let mut config: Result<Projects, _> = toml::from_str(&fs::read_to_string(&config_file)?);
+    while let Err(ref err) = config {
+        // display error and ask for action
+        match inquire::Select::new(
+            format!("config file is invalid: {err}\n\nwhat do you want to do?").as_str(),
+            vec!["edit", "generate new", "exit"],
+        )
+        .prompt()?
+        {
+            "edit" => {
+                let mut edited = Projects::new();
+                if edit_project(&mut edited, config_file).is_ok() {
+                    config = Ok(edited)
+                };
+            }
+            "generate new" => {
+                // generate new empty configuration
+                save_config(&Projects::new(), config_file)?;
+                config = Ok(Projects::new())
+            }
+            "exit" => std::process::exit(1),
+            _ => (),
+        }
+    }
+    Ok(config?)
 }
 
 fn add_dir(config: &mut Projects, config_file: &PathBuf) -> Result<()> {
@@ -311,7 +338,7 @@ fn sort_config(config: &mut Projects) {
         let mut keys = config.paths.keys().cloned().collect::<Vec<String>>();
         keys.sort();
         for k in keys {
-            let val = config.paths.remove(&k).unwrap();
+            let val = config.paths.swap_remove(&k).unwrap();
             new_paths.insert(k, val);
         }
         config.paths = new_paths;
@@ -323,7 +350,7 @@ fn edit_project(config: &mut Projects, config_file: &PathBuf) -> Result<()> {
         .arg(config_file)
         .spawn()?
         .wait()?;
-    let new_config: Projects = toml::from_str(&fs::read_to_string(config_file)?)?;
+    let new_config = load_config(config_file)?;
     config.paths = new_config.paths;
     config.editor = new_config.editor;
     config.open_cmd = new_config.open_cmd;

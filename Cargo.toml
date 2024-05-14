@@ -1,6 +1,6 @@
 [package]
 name = "wspick"
-version = "1.2.3"
+version = "1.3.0"
 authors = ["MnlPhlp <online@philipp-manuel.de>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
