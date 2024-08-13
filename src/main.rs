@@ -52,6 +52,10 @@ struct Flags {
     #[arg(short, long)]
     print: bool,
 
+    /// use alternative configuration file at `$HOME/.config/wspick/<name>.toml`
+    #[arg(short, long)]
+    config: Option<String>,
+
     /// chose [new], [edit] or a path directly, without opening the selector
     cmd_or_path: Option<String>,
     /// path for project if given after [new] command
@@ -64,7 +68,11 @@ fn main() -> Result<()> {
     let dirs = directories::ProjectDirs::from("io.github", "mnlphlp", "wspick")
         .expect("home directory has to be found");
     let config_dir = dirs.config_dir();
-    let config_file = config_dir.join("wspick.toml");
+    let config_file = if let Some(name) = flags.config {
+        config_dir.join(format!("{}.toml", name))
+    } else {
+        config_dir.join("wspick.toml")
+    };
     if !config_file.try_exists()? {
         save_config(&Projects::new(), &config_file)?;
     }
