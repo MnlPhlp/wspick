@@ -12,7 +12,7 @@ If you hate typing out all your long project paths in the terminal just to cd th
   [new project]
   [new dir]
   [edit]
-[↑↓ to move, enter to select, type to filter]
+[↑↓ to move, enter to select, tab to complete, type to filter]
 ```
 
 ```bash
@@ -20,7 +20,7 @@ If you hate typing out all your long project paths in the terminal just to cd th
 ? select project: tes 
 > test1
   test2
-[↑↓ to move, enter to select, type to filter]
+[↑↓ to move, enter to select, tab to complete, type to filter]
 ```
 
 -----
@@ -35,13 +35,44 @@ Calling wspick opens a selector with projects that can be opened in a configured
 New projects can be added by selecting `new project` and specifing path and name or by selecting `edit` and editing the config directly.
 With `new dir` you can add a path and wspick will show all directories in that path as project.
 
+### Tab completion
+While filtering, `Tab` completes the input up to the first character where the remaining
+options differ. With the options `backend-api` and `backend-worker`, typing `back` and pressing
+`Tab` gives `backend-`. If only one option is left, `Tab` completes it fully.
+
+### Sub menus
+Directories found inside a configured `dir` are shown as a sub menu instead of a project if they
+only contain other directories. Such entries are marked with a trailing `/`.
+Selecting one opens a new selection with the projects inside that directory. This works for
+arbitrarily deep nesting. Choose `[..]` or press `Esc` to go back one level.
+
+A directory is treated as a project (and not as sub menu) if it
+- is a git repository (contains `.git`), or
+- contains any non-hidden file, or
+- is empty.
+
+```bash
+❯ wspick
+? select project:
+> group/
+  repo
+  [new project]
+  [new dir]
+  [edit]
+
+? select project in group:
+> alpha
+  beta
+  [..]
+```
+
 ```bash
 wspick
 ? select project  
 > [new project]
   [new dir]
   [edit]
-[↑↓ to move, enter to select, type to filter]
+[↑↓ to move, enter to select, tab to complete, type to filter]
 ```
 
 ### Parameters

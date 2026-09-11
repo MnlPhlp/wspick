@@ -9,11 +9,10 @@ use anyhow::Result;
 use clap::Parser;
 use doc_consts::DocConsts;
 use indexmap::IndexMap;
-use inquire::{
-    validator::{ErrorMessage, StringValidator, Validation},
-    CustomUserError,
-};
 use serde_derive::{Deserialize, Serialize};
+
+mod select;
+use select::{select, text, text_with_validator};
 
 #[derive(Debug, Deserialize, Serialize, DocConsts)]
 struct Projects {
@@ -90,15 +89,63 @@ fn main() -> Result<()> {
         }
     }
     // build and show menu
+    // stack of currently opened sub menus (directories that only contain directories)
+    let mut menu_stack: Vec<PathBuf> = vec![];
     while path.is_none() {
+        let page_size = termsize::get()
+            .map(|size| size.rows.saturating_sub(3).max(1))
+            .unwrap_or(10) as usize;
+        if let Some(current) = menu_stack.last().cloned() {
+            // sub menu: show entries of the selected directory
+            let mut options = vec![];
+            let entries = add_options_from_dirs(
+                &config,
+                &mut options,
+                std::slice::from_ref(&current),
+                false,
+            )?;
+            options.push("[..]".into());
+            // show the chain of opened sub menus, e.g. "group/nested"
+            let chain = menu_stack
+                .iter()
+                .map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+                .map(|n| n.unwrap_or_default())
+                .collect::<Vec<_>>()
+                .join(MENU_SUFFIX);
+            let prompt = format!("select project in {chain}:");
+            match select(&prompt, &options, page_size)? {
+                None => {
+                    // escape goes back one level
+                    menu_stack.pop();
+                }
+                Some(selected) => match entries.get(&selected) {
+                    Some(Entry::Project(p)) => path = Some(p.clone()),
+                    Some(Entry::Menu(p)) => menu_stack.push(PathBuf::from(p)),
+                    None => {
+                        menu_stack.pop();
+                    }
+                },
+            }
+            continue;
+        }
         let mut options: Vec<String> = config.paths.keys().cloned().collect();
-        let dir_paths = add_options_from_dirs(&mut config, &mut options)?;
+        let dirs: Vec<PathBuf> = config
+            .dirs
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        let entries = add_options_from_dirs(
+            &config,
+            &mut options,
+            &dirs,
+            config.exclude_proj_dirs.unwrap_or(false),
+        )?;
         options.push("[new project]".into());
         options.push("[new dir]".into());
         options.push("[edit]".into());
-        let menu = inquire::Select::new("select project:", options)
-            .with_page_size(termsize::get().map(|size| size.rows - 3).unwrap_or(10) as usize);
-        if let Some(selected) = menu.prompt_skippable()? {
+        if let Some(selected) = select("select project:", &options, page_size)? {
             match config.paths.get(&selected) {
                 None => {
                     if selected == "[new project]" {
@@ -108,12 +155,13 @@ fn main() -> Result<()> {
                     } else if selected == "[edit]" {
                         edit_project(&mut config, &config_file)?;
                     } else {
-                        path = Some(
-                            dir_paths
-                                .get(&selected)
-                                .expect("invalid option, this should never happen")
-                                .clone(),
-                        );
+                        match entries
+                            .get(&selected)
+                            .expect("invalid option, this should never happen")
+                        {
+                            Entry::Project(p) => path = Some(p.clone()),
+                            Entry::Menu(p) => menu_stack.push(PathBuf::from(p)),
+                        }
                     }
                 }
                 Some(val) => path = Some(val.clone()),
@@ -127,15 +175,19 @@ fn main() -> Result<()> {
 }
 
 fn load_config(config_file: &PathBuf) -> Result<Projects> {
-    let mut config: Result<Projects, _> = toml::from_str(&fs::read_to_string(&config_file)?);
+    let mut config: Result<Projects, _> = toml::from_str(&fs::read_to_string(config_file)?);
     while let Err(ref err) = config {
         // display error and ask for action
-        match inquire::Select::new(
+        let choice = select(
             format!("config file is invalid: {err}\n\nwhat do you want to do?").as_str(),
-            vec!["edit", "generate new", "exit"],
-        )
-        .prompt()?
-        {
+            &[
+                "edit".to_string(),
+                "generate new".to_string(),
+                "exit".to_string(),
+            ],
+            3,
+        )?;
+        match choice.as_deref().unwrap_or("exit") {
             "edit" => {
                 let mut edited = Projects::new();
                 if edit_project(&mut edited, config_file).is_ok() {
@@ -155,9 +207,7 @@ fn load_config(config_file: &PathBuf) -> Result<Projects> {
 }
 
 fn add_dir(config: &mut Projects, config_file: &PathBuf) -> Result<()> {
-    let path = inquire::Text::new("directory path:")
-        .with_validator(FileValidator)
-        .prompt()?;
+    let path = text_with_validator("directory path:", validate_path)?;
     if config.dirs.is_none() {
         config.dirs = Some(vec![])
     }
@@ -167,72 +217,127 @@ fn add_dir(config: &mut Projects, config_file: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+/// An entry in the selection menu that was discovered from a configured directory
+#[derive(Debug, Clone)]
+enum Entry {
+    /// a project that can be opened
+    Project(String),
+    /// a directory that only contains other directories and is shown as sub menu
+    Menu(String),
+}
+
+/// Suffix appended to sub menu entries so they can be told apart from projects
+const MENU_SUFFIX: &str = "/";
+
+/// Decide whether a directory should be shown as sub menu instead of a project.
+///
+/// A directory is a sub menu if it is not a git repository, contains at least one
+/// directory and contains no (non hidden) files.
+fn is_sub_menu(dir: &Path) -> bool {
+    let Ok(read) = fs::read_dir(dir) else {
+        return false;
+    };
+    let mut has_dir = false;
+    for entry in read.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name == ".git" {
+            // git repositories are always projects
+            return false;
+        }
+        if name.starts_with('.') {
+            // ignore other hidden entries
+            continue;
+        }
+        match entry.file_type() {
+            Ok(ft) if ft.is_dir() => has_dir = true,
+            // files (or symlinks to files) mark this as project
+            Ok(_) => return false,
+            Err(_) => return false,
+        }
+    }
+    has_dir
+}
+
+/// Add all subdirectories of `dirs` to `options` and return a map from option name to entry.
+///
+/// If `exclude_proj_dirs` is set, directories that contain already configured projects
+/// or searched directories are skipped.
 fn add_options_from_dirs(
-    config: &mut Projects,
+    config: &Projects,
     options: &mut Vec<String>,
-) -> Result<HashMap<String, String>> {
+    dirs: &[PathBuf],
+    exclude_proj_dirs: bool,
+) -> Result<HashMap<String, Entry>> {
     let mut map = HashMap::new();
-    if let Some(dirs) = config.dirs.as_ref() {
-        for dir in dirs {
-            let dir_path = PathBuf::from(dir);
-            let dir_name = dir_path.file_name().map(|d| d.to_str());
-            if dir_name.is_none() || dir_name.unwrap().is_none() {
-                continue;
-            }
-            // filter for directories
-            let mut paths = fs::read_dir(dir)?
-                .filter(|f| {
-                    if f.is_err() {
-                        return false;
+    for dir in dirs {
+        let dir_name = dir.file_name().map(|d| d.to_str());
+        if dir_name.is_none() || dir_name.unwrap().is_none() {
+            continue;
+        }
+        // filter for directories
+        let mut paths = fs::read_dir(dir)?
+            .filter(|f| {
+                if f.is_err() {
+                    return false;
+                }
+                if let Ok(ft) = f.as_ref().unwrap().file_type() {
+                    return ft.is_dir();
+                }
+                false
+            })
+            .collect::<Vec<_>>();
+        if exclude_proj_dirs {
+            // filter out directories that contain projects
+            paths.retain(|p| {
+                if let Ok(p) = p {
+                    let name = p.file_name().to_string_lossy().to_string();
+                    // filter custom project paths
+                    for proj in config.paths.values() {
+                        if proj.contains(&name) {
+                            return false;
+                        }
                     }
-                    if let Ok(ft) = f.as_ref().unwrap().file_type() {
-                        return ft.is_dir();
-                    }
-                    false
-                })
-                .collect::<Vec<_>>();
-            if let Some(true) = config.exclude_proj_dirs {
-                // filter out directories that contain projects
-                paths.retain(|p| {
-                    if let Ok(p) = p {
-                        let name = p.file_name().to_string_lossy().to_string();
-                        // filter custom project paths
-                        for proj in config.paths.values() {
-                            if proj.contains(&name) {
+                    // filter searched dirs
+                    if let Some(dirs) = &config.dirs {
+                        for dir in dirs {
+                            if dir.contains(&name) {
                                 return false;
                             }
                         }
-                        // filter searched dirs
-                        if let Some(dirs) = &config.dirs {
-                            for dir in dirs {
-                                if dir.contains(&name) {
-                                    return false;
-                                }
-                            }
-                        }
                     }
-                    true
-                });
-            }
-            for path in paths {
-                if let Ok(path) = path.map(|p| p.path()) {
-                    let path_str = path.to_str();
-                    let name = path.file_name().map(|n| n.to_str());
-                    if path_str.is_none()
-                        || name.is_none()
-                        || name.unwrap().is_none()
-                        || name.unwrap().unwrap().starts_with('.')
-                    {
-                        continue;
-                    }
-                    let key = String::from(name.unwrap().unwrap());
-                    options.push(key.clone());
-                    map.insert(key, path_str.unwrap().into());
                 }
+                true
+            });
+        }
+        for path in paths {
+            if let Ok(path) = path.map(|p| p.path()) {
+                let path_str = path.to_str();
+                let name = path.file_name().map(|n| n.to_str());
+                if path_str.is_none()
+                    || name.is_none()
+                    || name.unwrap().is_none()
+                    || name.unwrap().unwrap().starts_with('.')
+                {
+                    continue;
+                }
+                let path_str: String = path_str.unwrap().into();
+                let (key, entry) = if is_sub_menu(&path) {
+                    (
+                        format!("{}{MENU_SUFFIX}", name.unwrap().unwrap()),
+                        Entry::Menu(path_str),
+                    )
+                } else {
+                    (
+                        String::from(name.unwrap().unwrap()),
+                        Entry::Project(path_str),
+                    )
+                };
+                options.push(key.clone());
+                map.insert(key, entry);
             }
         }
-        options.sort();
     }
+    options.sort();
     Ok(map)
 }
 
@@ -299,25 +404,12 @@ fn open_project(cmd: &str, path: &str, print: bool) -> Result<()> {
     Ok(())
 }
 
-#[derive(Clone)]
-struct FileValidator;
-impl StringValidator for FileValidator {
-    fn validate(
-        &self,
-        input: &str,
-    ) -> std::result::Result<inquire::validator::Validation, inquire::CustomUserError> {
-        match Path::new(input).try_exists() {
-            Ok(val) => {
-                if val {
-                    Ok(Validation::Valid)
-                } else {
-                    Ok(Validation::Invalid(ErrorMessage::Custom(format!(
-                        "path '{input}' does not exist"
-                    ))))
-                }
-            }
-            Err(e) => Err(CustomUserError::from(e)),
-        }
+/// Check that the given input is an existing path.
+fn validate_path(input: &str) -> Result<(), String> {
+    match Path::new(input).try_exists() {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(format!("path '{input}' does not exist")),
+        Err(e) => Err(e.to_string()),
     }
 }
 
@@ -326,12 +418,10 @@ fn new_project(
     config_file: &PathBuf,
     path: Option<String>,
 ) -> Result<String> {
-    let name = inquire::Text::new("project name:").prompt()?;
+    let name = text("project name:")?;
     let path = match path {
         Some(p) => p,
-        None => inquire::Text::new("project path:")
-            .with_validator(FileValidator)
-            .prompt()?,
+        None => text_with_validator("project path:", validate_path)?,
     };
     // store adjusted config
     config.paths.insert(name, path.clone());
